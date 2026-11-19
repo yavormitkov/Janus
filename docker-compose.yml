@@ -1,0 +1,48 @@
+services:
+  janus-db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: janus_sql_server
+    environment:
+      - ACCEPT_EULA=Y
+      - MSSQL_PID=Developer
+      - MSSQL_SA_PASSWORD=${MSSQL_SA_PASSWORD}
+    ports:
+      - "1433:1433"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U SA -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  janus-db-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: janus_sql_server_init
+    environment:
+      - MSSQL_SA_PASSWORD=${MSSQL_SA_PASSWORD}
+    volumes:
+      - ./scripts:/scripts:ro
+    depends_on:
+      janus-db:
+        condition: service_healthy
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        set -e
+        /opt/mssql-tools18/bin/sqlcmd -S janus-db,1433 -U SA -P "$$MSSQL_SA_PASSWORD" -C -b -i /scripts/01-init/01_db_and_schemas.sql && \
+        /opt/mssql-tools18/bin/sqlcmd -S janus-db,1433 -U SA -P "$$MSSQL_SA_PASSWORD" -C -b -d JanusFinancialDb -i /scripts/02-tables/01_staging_tables.sql && \
+        /opt/mssql-tools18/bin/sqlcmd -S janus-db,1433 -U SA -P "$$MSSQL_SA_PASSWORD" -C -b -d JanusFinancialDb -i /scripts/02-tables/02_ledger_tables.sql && \
+        /opt/mssql-tools18/bin/sqlcmd -S janus-db,1433 -U SA -P "$$MSSQL_SA_PASSWORD" -C -b -d JanusFinancialDb -i /scripts/02-tables/03_audit_tables.sql && \
+        /opt/mssql-tools18/bin/sqlcmd -S janus-db,1433 -U SA -P "$$MSSQL_SA_PASSWORD" -C -b -d JanusFinancialDb -i /scripts/03-procedures/01_sp_ProcessInboundClearing.sql && \
+        /opt/mssql-tools18/bin/sqlcmd -S janus-db,1433 -U SA -P "$$MSSQL_SA_PASSWORD" -C -b -d JanusFinancialDb -i /scripts/03-procedures/02_sp_InsertInboundTransaction.sql && \
+        /opt/mssql-tools18/bin/sqlcmd -S janus-db,1433 -U SA -P "$$MSSQL_SA_PASSWORD" -C -b -d JanusFinancialDb -i /scripts/03-procedures/04_sp_GetAndProcessPendingOutboxEvents.sql && \
+        /opt/mssql-tools18/bin/sqlcmd -S janus-db,1433 -U SA -P "$$MSSQL_SA_PASSWORD" -C -b -d JanusFinancialDb -i /scripts/03-procedures/05_sp_AllocatePayment.sql && \
+        /opt/mssql-tools18/bin/sqlcmd -S janus-db,1433 -U SA -P "$$MSSQL_SA_PASSWORD" -C -b -d JanusFinancialDb -i /scripts/03-procedures/06_sp_ApplySuspenseCorrection.sql && \
+        /opt/mssql-tools18/bin/sqlcmd -S janus-db,1433 -U SA -P "$$MSSQL_SA_PASSWORD" -C -b -d JanusFinancialDb -i /scripts/03-procedures/07_sp_UpdateSuspenseInboundStatus.sql && \
+        /opt/mssql-tools18/bin/sqlcmd -S janus-db,1433 -U SA -P "$$MSSQL_SA_PASSWORD" -C -b -d JanusFinancialDb -i /scripts/03-procedures/08_sp_ProposeSuspenseCorrection.sql && \
+        /opt/mssql-tools18/bin/sqlcmd -S janus-db,1433 -U SA -P "$$MSSQL_SA_PASSWORD" -C -b -d JanusFinancialDb -i /scripts/03-procedures/09_sp_UpdateOutboxEventStatus.sql && \
+        /opt/mssql-tools18/bin/sqlcmd -S janus-db,1433 -U SA -P "$$MSSQL_SA_PASSWORD" -C -b -d JanusFinancialDb -i /scripts/03-procedures/10_sp_CloseSuspenseTransaction.sql && \
+        /opt/mssql-tools18/bin/sqlcmd -S janus-db,1433 -U SA -P "$$MSSQL_SA_PASSWORD" -C -b -d JanusFinancialDb -i /scripts/03-procedures/11_sp_AllocatePaymentBatch.sql && \
+        /opt/mssql-tools18/bin/sqlcmd -S janus-db,1433 -U SA -P "$$MSSQL_SA_PASSWORD" -C -b -d JanusFinancialDb -i /scripts/04-functions/01_fn_CalculateWaterfall.sql && \
+        /opt/mssql-tools18/bin/sqlcmd -S janus-db,1433 -U SA -P "$$MSSQL_SA_PASSWORD" -C -b -d JanusFinancialDb -i /scripts/migrations/03_seed_profiles.sql

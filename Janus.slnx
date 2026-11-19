@@ -1,0 +1,19 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".env" />
+    <File Path="README.md" />
+  </Folder>
+  <Folder Name="/Solution Items/docs/">
+    <File Path="architecture.md" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Janus.BackOffice.Ui/Janus.BackOffice.Ui.csproj" Id="25ce7086-b163-4493-816b-62eaf8f05739" />
+    <Project Path="src/Janus.Core.Shared/Janus.Core.Shared.csproj" />
+    <Project Path="src/Janus.Gateway/Janus.Gateway.csproj" />
+    <Project Path="src/Janus.IntegrationTests/Janus.IntegrationTests.csproj" />
+    <Project Path="src/janus_clearing_engine/janus_clearing_engine.csproj" />
+    <Project Path="src/janus_ledger_api/janus_ledger_api.csproj" />
+    <Project Path="src/janus_message_processor/janus_message_processor.csproj" Id="b2d2278c-c4a4-4dbf-8074-f0cbbb66e9f5" />
+    <Project Path="src/janus_rawdata_processor/janus_rawdata_processor.csproj" Id="0494052b-f782-46ce-90a2-7547a133078c" />
+  </Folder>
+</Solution>

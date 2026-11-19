@@ -1,0 +1,93 @@
+﻿@page "/"
+@using Janus.Core.Shared.Enums
+
+<PageTitle>Suspense Queue - Project Janus</PageTitle>
+
+<div class="container-fluid mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>Suspense Ingestion Queue</h2>
+        <span class="badge bg-primary">Active Operator: @_currentRole</span>
+    </div>
+
+    @if (_transactions == null)
+    {
+        <div class="d-flex justify-content-center my-5">
+            <div class="spinner-border text-primary" role="status"></div>
+        </div>
+    }
+    else if (!_transactions.Any())
+    {
+        <div class="alert alert-info" role="alert">
+            No unresolved suspense transactions found in the ledger for this role.
+        </div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-striped table-hover align-middle">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Reference</th>
+                        <th>File Ref</th>
+                        <th>Inbound EGN</th>
+                        <th>Inbound Name</th>
+                        <th>Corrected EGN</th>
+                        <th>Amount</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var tx in _transactions)
+                    {
+                        <tr class="@(tx.IsNameMismatch ? "table-danger" : "")">
+                            <td>
+                                @if (tx.IsNameMismatch)
+                                {
+                                    <span class="text-danger me-1" title="Name Mismatch Risk Detected">⚠️</span>
+                                }
+                                @tx.ReferenceNumber
+                            </td>
+                            <td>@tx.FileReference</td>
+                            <td><code>@tx.InboundEGN</code></td>
+                            <td>@tx.InboundClientName</td>
+                            <td><code>@(tx.CorrectedEGN ?? "-")</code></td>
+                            <td class="fw-bold">€@tx.Amount.ToString("N2")</td>
+                            <td>
+                                <span class="badge @GetStatusBadgeClass(tx.SuspenseStatus)">
+                                    @tx.SuspenseStatus
+                                </span>
+                            </td>
+                            <td>
+                                @if (_currentRole == "Maker" && tx.SuspenseStatus == SuspenseStatus.Unresolved)
+                                {
+                                    <button class="btn btn-sm btn-warning"
+                                            @onclick="() => OpenCorrectionModal(tx)"
+                                            disabled="@IsTransactionOverLimit(tx)"
+                                            title="@(IsTransactionOverLimit(tx) ? $"Exceeds limit of €{_maxManualCorrectionLimit:N2}" : "Correct transaction")">
+                                        Correct
+                                    </button>
+                                }
+                                @if (_currentRole == "Checker" && tx.SuspenseStatus == SuspenseStatus.PendingApproval)
+                                {
+                                    <div class="btn-group gap-1">
+                                        <button class="btn btn-sm btn-success" @onclick="() => HandleApproveAsync(tx.TransactionId)">Approve</button>
+                                        <button class="btn btn-sm btn-danger" @onclick="() => HandleRejectAsync(tx.TransactionId)">Reject</button>
+                                    </div>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@if (_selectedTransaction != null)
+{
+    <CorrectTransactionModal Transaction="_selectedTransaction"
+                             IsOpen="_isModalOpen"
+                             OnConfirm="HandleCorrectionConfirmAsync"
+                             OnCancel="CloseCorrectionModal" />
+}

@@ -1,0 +1,18 @@
+{
+  "profiles": {
+    "janus_rawdata_processor": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "environmentVariables": {
+        "DB_PASSWORD": "SecureFinTechPass123!"
+      }
+    }
+  },
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.Heading": "Warning",
+      "Microsoft.Hosting.Lifetime": "Information"
+    }
+  }
+}

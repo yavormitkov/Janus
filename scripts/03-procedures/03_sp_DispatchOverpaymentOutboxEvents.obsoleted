@@ -1,0 +1,36 @@
+USE [JanusFinancialDb]
+GO
+
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE PROCEDURE ledger.sp_DispatchOverpaymentOutboxEvents
+    @OverpaymentId UNIQUEIDENTIFIER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    INSERT INTO ledger.OutboxEvents (EventId, EventType, Payload, IsProcessed, CreatedAt)
+    SELECT 
+        NEWID() AS EventId,
+        'OverpaymentDetectedEvent' AS EventType,
+        (
+            SELECT 
+                o.ClientId AS clientId,
+                it.Amount AS originalAmount,
+                o.Amount AS overpaidAmount,
+                it.ReferenceNumber AS referenceNumber,
+                it.FileReference AS fileReference
+            FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+        ) AS Payload,
+        0 AS IsProcessed,
+        SYSUTCDATETIME() AS CreatedAt
+    FROM ledger.Overpayments o WITH (NOLOCK)
+	INNER JOIN staging.InboundTransactions it on it.StagingId = o.TransactionId
+    WHERE o.OverpaymentId =  @OverpaymentId
+      AND it.Processed = 1;
+END;
+GO

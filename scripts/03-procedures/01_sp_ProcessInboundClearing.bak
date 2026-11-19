@@ -1,0 +1,145 @@
+USE JanusFinancialDb;
+GO
+
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+IF OBJECT_ID('ledger.sp_ProcessInboundClearing', 'P') IS NOT NULL
+BEGIN
+    DROP PROCEDURE ledger.sp_ProcessInboundClearing;
+END
+GO
+
+CREATE PROCEDURE ledger.sp_ProcessInboundClearing
+    @FileReference NVARCHAR(150)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF EXISTS (SELECT 1 FROM staging.ProcessedFiles WHERE FileName = @FileReference and IsCleared = 1)
+    BEGIN
+        RAISERROR('File has already been processed and finalized.', 16, 1);
+        RETURN;
+    END;
+
+    BEGIN TRANSACTION;
+
+    BEGIN TRY
+        
+        INSERT INTO ledger.SuspenseTransactions 
+        (
+            TransactionId,
+            TraceId,
+            FileReference, 
+            InboundEGN, 
+            InboundClientName, 
+            Amount, 
+            ReferenceNumber, 
+            SuspenseStatus
+        )
+        SELECT 
+            stg.TransactionId,
+            stg.TraceId,
+            stg.FileReference,
+            stg.RawEGN,
+            stg.RawClientName,
+            stg.Amount,
+            stg.ReferenceNumber,
+            CASE 
+                WHEN r.ReferenceNumber IS NOT NULL THEN 60
+                WHEN tx.TransactionId IS NOT NULL THEN 80
+                ELSE 10
+            END
+        FROM staging.InboundTransactions stg
+        LEFT JOIN ledger.Clients cl 
+            ON cl.EGN = stg.RawEGN
+        LEFT JOIN ledger.IdempotencyRegistry r 
+            ON stg.ReferenceNumber = r.ReferenceNumber 
+        LEFT JOIN ledger.SuspenseTransactions tx 
+            ON stg.ReferenceNumber = tx.ReferenceNumber
+        WHERE stg.FileReference = @FileReference
+          AND stg.Processed = 0
+          AND (cl.ClientId IS NULL OR r.ReferenceNumber IS NOT NULL OR tx.TransactionId IS NOT NULL);
+
+        UPDATE stg
+        SET stg.Processed = 3
+        FROM staging.InboundTransactions stg
+        INNER JOIN ledger.SuspenseTransactions tx 
+            ON stg.TransactionId = tx.TransactionId
+        WHERE stg.FileReference = @FileReference
+          AND stg.Processed = 0;
+
+        DECLARE @TransactionId UNIQUEIDENTIFIER;
+        DECLARE @TraceId VARCHAR(55);
+        DECLARE @RawEGN NVARCHAR(10);
+        DECLARE @Amount DECIMAL(18, 2);
+        DECLARE @ReferenceNumber NVARCHAR(50);
+
+        DECLARE clearing_cursor CURSOR LOCAL STATIC FOR
+        SELECT 
+            stg.TransactionId,
+            stg.TraceId,
+            stg.RawEGN,
+            stg.Amount,
+            stg.ReferenceNumber
+        FROM staging.InboundTransactions stg
+        INNER JOIN ledger.Clients cl 
+            ON cl.EGN = stg.RawEGN
+        LEFT JOIN ledger.IdempotencyRegistry r 
+            ON stg.ReferenceNumber = r.ReferenceNumber 
+        WHERE stg.FileReference = @FileReference
+          AND stg.Processed = 0
+          AND r.ReferenceNumber IS NULL;
+
+        OPEN clearing_cursor;
+
+        FETCH NEXT FROM clearing_cursor INTO 
+            @TransactionId, @TraceId, @RawEGN, @Amount, @ReferenceNumber;
+
+        WHILE @@FETCH_STATUS = 0
+        BEGIN
+            INSERT INTO ledger.IdempotencyRegistry (ReferenceNumber, FileName, EGN)
+            VALUES (@ReferenceNumber, @FileReference, @RawEGN);
+
+            EXEC ledger.sp_AllocatePayment 
+                @EGN = @RawEGN,
+                @Amount = @Amount,
+                @TransactionId = @TransactionId,
+                @TraceId = @TraceId;
+
+
+			EXEC staging.sp_UpdateSuspenseInboundStatus
+				@TransactionId = @TransactionId,
+				@Status = 1;
+
+			UPDATE staging.ProcessedFiles SET IsCleared = 1 
+			WHERE FileName = @FileReference;
+
+            FETCH NEXT FROM clearing_cursor INTO 
+                @TransactionId, @TraceId, @RawEGN, @Amount, @ReferenceNumber;
+        END;
+
+        CLOSE clearing_cursor;
+        DEALLOCATE clearing_cursor;       
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF CURSOR_STATUS('local', 'clearing_cursor') >= 0
+        BEGIN
+            CLOSE clearing_cursor;
+            DEALLOCATE clearing_cursor;
+        END;
+
+        IF @@TRANCOUNT > 0
+        BEGIN
+            ROLLBACK TRANSACTION;
+        END;
+        
+        THROW;
+    END CATCH
+END;
+GO

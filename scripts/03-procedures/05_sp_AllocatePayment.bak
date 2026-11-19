@@ -1,0 +1,104 @@
+﻿USE JanusFinancialDb;
+GO
+
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+IF OBJECT_ID('ledger.sp_AllocatePayment', 'P') IS NOT NULL
+BEGIN
+    DROP PROCEDURE ledger.sp_AllocatePayment;
+END
+GO
+
+CREATE PROCEDURE ledger.sp_AllocatePayment
+    @EGN NVARCHAR(50),
+    @Amount DECIMAL(18, 2),
+    @TransactionId UNIQUEIDENTIFIER,
+	@TraceId NVARCHAR(55)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @ClientId UNIQUEIDENTIFIER;
+    DECLARE @InterestDebt DECIMAL(18, 2);
+    DECLARE @ExpensesDebt DECIMAL(18, 2);
+    DECLARE @PrincipalDebt DECIMAL(18, 2);
+
+    SELECT TOP 1 
+        @ClientId = cl.ClientId,
+        @InterestDebt = d.InterestDebt,
+        @ExpensesDebt = d.ExpensesDebt,
+        @PrincipalDebt = d.PrincipalDebt
+    FROM ledger.Clients cl WITH (ROWLOCK, UPDLOCK)
+    INNER JOIN ledger.Debts d WITH (ROWLOCK, UPDLOCK) ON cl.ClientId = d.ClientId
+    WHERE cl.EGN = @EGN;
+
+    IF @ClientId IS NULL
+    BEGIN
+        RAISERROR('No active debt or client found for the provided EGN.', 16, 1);
+        RETURN;
+    END;
+
+    DECLARE @RemainingPayment DECIMAL(18, 2) = @Amount;
+    DECLARE @Deduction DECIMAL(18, 2);
+
+    IF @RemainingPayment > 0 AND @InterestDebt > 0
+    BEGIN
+        SET @Deduction = CASE WHEN @RemainingPayment >= @InterestDebt THEN @InterestDebt ELSE @RemainingPayment END;
+        SET @InterestDebt = @InterestDebt - @Deduction;
+        SET @RemainingPayment = @RemainingPayment - @Deduction;
+    END;
+
+    IF @RemainingPayment > 0 AND @ExpensesDebt > 0
+    BEGIN
+        SET @Deduction = CASE WHEN @RemainingPayment >= @ExpensesDebt THEN @ExpensesDebt ELSE @RemainingPayment END;
+        SET @ExpensesDebt = @ExpensesDebt - @Deduction;
+        SET @RemainingPayment = @RemainingPayment - @Deduction;
+    END;
+	
+    IF @RemainingPayment > 0 AND @PrincipalDebt > 0
+    BEGIN
+        SET @Deduction = CASE WHEN @RemainingPayment >= @PrincipalDebt THEN @PrincipalDebt ELSE @RemainingPayment END;
+        SET @PrincipalDebt = @PrincipalDebt - @Deduction;
+        SET @RemainingPayment = @RemainingPayment - @Deduction;
+    END;
+
+    UPDATE ledger.Debts
+    SET 
+        InterestDebt = @InterestDebt,
+        ExpensesDebt = @ExpensesDebt,
+        PrincipalDebt = @PrincipalDebt,
+        TotalDebt = @InterestDebt + @ExpensesDebt + @PrincipalDebt,
+        IsArchived = CASE WHEN (@InterestDebt + @ExpensesDebt + @PrincipalDebt) <= 0.00 THEN 1 ELSE 0 END,
+        UpdatedAt = SYSUTCDATETIME()
+    WHERE ClientId = @ClientId AND IsArchived = 0;
+
+    IF @RemainingPayment > 0
+    BEGIN
+        INSERT INTO ledger.Overpayments (OverpaymentId, TransactionId, ClientId, Amount)
+        VALUES (NEWID(), @TransactionId, @ClientId, @RemainingPayment);
+
+        INSERT INTO ledger.OutboxEvents (EventId, EventType, Payload, TraceId, IsProcessed, CreatedAt)
+        SELECT 
+            NEWID(),
+            'OverpaymentDetectedEvent',
+            (
+                SELECT 
+                    @ClientId AS ClientId,
+                    it.Amount AS OriginalAmount,
+                    @RemainingPayment AS OverpaidAmount,
+                    it.ReferenceNumber AS ReferenceNumber,
+                    it.FileReference AS FileReference
+                FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+            ),
+            it.TraceId,
+            0,
+            SYSUTCDATETIME()
+        FROM staging.InboundTransactions it 
+        WHERE it.TransactionId = @TransactionId;
+    END;
+END;
+GO

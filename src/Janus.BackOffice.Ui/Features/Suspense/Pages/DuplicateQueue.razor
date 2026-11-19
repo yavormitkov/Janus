@@ -1,0 +1,96 @@
+﻿@page "/duplicates"
+@using Janus.Core.Shared.Enums
+
+<PageTitle>Duplicate Transactions - Project Janus</PageTitle>
+
+<div class="container-fluid mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>Duplicate Transactions Queue</h2>
+        <span class="badge bg-primary">Active Operator: @_currentRole</span>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            @_errorMessage
+            <button type="button" class="btn-close" @onclick="() => _errorMessage = null"></button>
+        </div>
+    }
+
+    @if (_transactions == null)
+    {
+        <div class="d-flex justify-content-center my-5">
+            <div class="spinner-border text-primary" role="status"></div>
+        </div>
+    }
+    else if (!_transactions.Any())
+    {
+        <div class="alert alert-info" role="alert">
+            No duplicate transactions awaiting triage.
+        </div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-striped table-hover align-middle">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Reference</th>
+                        <th>File Ref</th>
+                        <th>Inbound EGN</th>
+                        <th>Inbound Name</th>
+                        <th>Amount</th>
+                        <th>Original Match</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var tx in _transactions)
+                    {
+                        <tr>
+                            <td class="fw-semibold">@tx.ReferenceNumber</td>
+                            <td>@tx.FileReference</td>
+                            <td><code>@tx.InboundEGN</code></td>
+                            <td>@tx.InboundClientName</td>
+                            <td class="fw-bold">€@tx.Amount.ToString("N2")</td>
+                            <td class="small">
+                                @if (!string.IsNullOrEmpty(tx.OriginalFileName))
+                                {
+                                    <div><strong>Ref:</strong> @tx.OriginalReferenceNumber</div>
+                                    <div><strong>File:</strong> @tx.OriginalFileName</div>
+                                    <div><strong>EGN:</strong> <code>@tx.OriginalEGN</code> (@tx.OriginalClientName)</div>
+                                    <div><strong>Amount:</strong> <code>@tx.OriginalAmount?.ToString("N2")</code> (@tx.OriginalClientName)</div>
+                                    <div class="text-muted">@tx.OriginalCreatedAt?.ToString("yyyy-MM-dd HH:mm:ss")</div>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">-</span>
+                                }
+                            </td>
+                            <td>
+                                <span class="badge @(tx.SuspenseStatus == SuspenseStatus.Duplicate ? "bg-danger" : "bg-warning text-dark")">
+                                    @tx.SuspenseStatus
+                                </span>
+                            </td>
+                            <td>
+                                <div class="btn-group gap-1">
+                                    <button class="btn btn-sm btn-outline-dark"
+                                            disabled="@_isProcessing"
+                                            @onclick="() => HandleReturnToProviderAsync(tx.TransactionId)">
+                                        Return to Provider
+                                    </button>
+                                    <button class="btn btn-sm btn-danger"
+                                            disabled="@_isProcessing"
+                                            @onclick="() => HandleRejectAsync(tx.TransactionId)">
+                                        Reject
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
