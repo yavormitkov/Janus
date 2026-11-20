@@ -5,7 +5,7 @@ An on-premise Proof of Concept (PoC) for inbound mass payment ingestion and dete
 ---
 
 ### Architectural Deep Dive
-For state machine definitions, mid-stream/post-commit crash recovery mechanics, SQL locking strategies, and production readiness trade-offs, see the [Janus Architecture Guide](docs/architecture.md).
+For state machine definitions, mid-stream/post-commit crash recovery mechanics, SQL locking strategies, and production readiness trade-offs, see the [Janus Architecture Guide](architecture.md).
 
 ---
 
