@@ -38,36 +38,8 @@ The architecture focuses on solving specific operational problems in batch payme
 
 ## Pipeline & Dataflow
 
-```text
-[SFTP Inbound Edge] --> [FileSystemWatcher] --> [BoundedChannel (Backpressure)]
-                                                            |
-+-----------------------------------------------------------+
-|
-v (PHASE 1: BULK INGESTION WORKER - ClearingIngestionWorker)
-  |-- Single FileStream --> IFileSignatureVerifier (Streaming RSA SHA-256 Check)
-  |-- Stream Rewind --> IClearingParser (ReadOnlySpan<char> Flat-File / Streaming XML)
-  |-- Inline Streaming HashSet Gate - O(1) Fail-Fast on Duplicate Row
-  |-- Reusable SqlDataRecord TVP Stream --> staging.InboundTransactions (Processed = 0) + staging.ProcessedFiles
-  v
-[File Moved to \ok\] --> Staging Persistent Boundary Established
-                                                            |
-+-----------------------------------------------------------+
-|
-v (PHASE 2: DECOUPLED LEDGER ENGINE - janus_rawdata_processor)
-[PeriodicTimer Tick] --> Fetch Unprocessed FileReference (Processed = 0)
-  |
-  v [Atomic DB Transaction Scope - SET XACT_ABORT ON]
-  [ledger.sp_ProcessInboundClearing]
-    |-- Unknown EGNs (Status 10), Replays (Status 60) & Suspense Duplicates (Status 80) --> ledger.SuspenseTransactions
-    +-- Validated Client Entries (ORDER BY RowIndex) --> [SET-BASED TVP (PaymentAllocationBatchType)]
-             |-- ledger.IdempotencyRegistry Unique Constraint Lock
-             +-- [ledger.sp_AllocatePaymentBatch]
-                      |-- Cumulative Window Partitioning + Inline TVF (CROSS APPLY fn_CalculateWaterfall)
-                      |-- Single Bulk Set-Based Balance Update (ROWLOCK, UPDLOCK, HOLDLOCK)
-                      +-- Bulk Overpayment Drift --> ledger.Overpayments + JSON Outbox Events
-```
+<img width="2259" height="8192" alt="janus-diagram" src="https://github.com/user-attachments/assets/2c03ff92-9e38-4553-aff8-123be0449795" />
 
----
 
 ## Resilience, Observability & Benchmarks
 
